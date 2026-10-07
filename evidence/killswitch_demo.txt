@@ -1,0 +1,8 @@
+call 1: allowed, total spent $0.0040
+call 2: allowed, total spent $0.0080
+call 3: BLOCKED, reason = usd_limit
+
+ledger:
+{'timestamp': '2026-10-07T03:12:52.900846+00:00', 'run_id': 'killswitch-demo', 'model': 'paid-model', 'status': 'allowed', 'reason': None, 'input_tokens': 1000, 'output_tokens': 1500, 'usd': 0.004, 'kes': 0.52, 'kes_rate': 130.0, 'kes_rate_date': '2026-09-29'}
+{'timestamp': '2026-10-07T03:12:52.900881+00:00', 'run_id': 'killswitch-demo', 'model': 'paid-model', 'status': 'allowed', 'reason': None, 'input_tokens': 1000, 'output_tokens': 1500, 'usd': 0.004, 'kes': 0.52, 'kes_rate': 130.0, 'kes_rate_date': '2026-09-29'}
+{'timestamp': '2026-10-07T03:12:52.900884+00:00', 'run_id': 'killswitch-demo', 'model': 'paid-model', 'status': 'blocked', 'reason': 'usd_limit', 'input_tokens': 1000, 'output_tokens': 2000, 'usd': 0.0, 'kes': 0.0, 'kes_rate': 130.0, 'kes_rate_date': '2026-09-29'}
