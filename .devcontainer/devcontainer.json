@@ -14,9 +14,11 @@
     }
   },
   "containerEnv": {
-    "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv-workbench"
+    "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv-workbench",
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "WAKATIME_HOME": "/home/vscode/.wakatime-home"
   },
-  "postCreateCommand": "pipx install uv pre-commit && uv sync && pre-commit install",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.wakatime-home && pipx install uv pre-commit && uv sync && pre-commit install",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -24,5 +26,9 @@
         "charliermarsh.ruff"
       ]
     }
-  }
+  },
+  "mounts": [
+    "source=claude-code-config,target=/home/vscode/.claude,type=volume",
+    "source=wakatime-config,target=/home/vscode/.wakatime-home,type=volume"
+  ]
 }
