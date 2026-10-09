@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+
 from capture.run import capture_source, run
 
 #  ------------ Test helpers ----------------------
@@ -12,6 +13,10 @@ class FakeResponse:
     def __init__(self, status: int, body: bytes):
         self.status = status
         self.body = body
+
+
+class Crash(BaseException):
+    """Pretends the program was killed. `except Exception` does not catch it."""
 
 
 class FakeFetch:
@@ -25,7 +30,7 @@ class FakeFetch:
         self.calls.append(url)
         result = self.responses[url]
 
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             raise result
         else:
             return result
@@ -535,6 +540,96 @@ def test_page_did_not_change(tmp_path):
     assert (tmp_path / "raw" / "page" / D1 / "page.html").exists()
 
     # day two IS saved; meta says nothing changed
-    assert (tmp_path / "raw" / "page" / T2 / "page.html").exists()
-    meta2 = json.loads((tmp_path / "raw" / "page" / T2 / "meta.json").read_text())
+    assert (tmp_path / "raw" / "page" / D2 / "page.html").exists()
+    meta2 = json.loads((tmp_path / "raw" / "page" / D2 / "meta.json").read_text())
     assert meta2["changed"] is False
+
+
+def test_files_downloaded_before_a_crash_are_kept_in_manifest(tmp_path):
+    fake = FakeFetch(
+        {
+            "https://example.test/listing": FakeResponse(
+                200,
+                b"""<html>
+        <a href="a.pdf">A</a>
+        <a href="b.pdf">B</a>
+        </html>""",
+            ),
+            "https://example.test/a.pdf": FakeResponse(200, b"PDF A"),
+            "https://example.test/b.pdf": Crash(),  # the program dies here
+        }
+    )
+
+    with pytest.raises(Crash):
+        capture_source(
+            {
+                "id": "listing",
+                "kind": "listing_page",
+                "url": "https://example.test/listing",
+            },
+            fake,
+            tmp_path,
+            T1,
+        )
+
+    # a.pdf was finished before the crash: it is in the manifest AND on disk
+    manifest = json.loads((tmp_path / "raw" / "listing" / "manifest.json").read_text())
+    assert "https://example.test/a.pdf" in manifest
+    entry = manifest["https://example.test/a.pdf"]
+    assert (tmp_path / "raw" / "listing" / entry["file"]).exists()
+
+    # b.pdf was never finished: it is not in the manifest
+    assert "https://example.test/b.pdf" not in manifest
+
+
+def test_at_most_50_new_files_are_downloaded_per_run(tmp_path):
+    # a listing page with 100 links, but only 50 should be downloaded per run
+    fake = FakeFetch(
+        {
+            "https://example.test/listing": FakeResponse(
+                200,
+                b"<html>"
+                + b"".join(
+                    f'<a href="file{i}.pdf">File {i}</a>'.encode() for i in range(100)
+                )
+                + b"</html>",
+            ),
+            **{
+                f"https://example.test/file{i}.pdf": FakeResponse(
+                    200, f"PDF {i}".encode()
+                )
+                for i in range(100)
+            },
+        }
+    )
+
+    capture_source(
+        {
+            "id": "listing",
+            "kind": "listing_page",
+            "url": "https://example.test/listing",
+        },
+        fake,
+        tmp_path,
+        T1,
+    )
+
+    # check that only 50 files were downloaded
+    # first run: only 50 files
+    day1_files = list((tmp_path / "raw" / "listing" / D1).glob("file*.pdf"))
+    assert len(day1_files) == 50
+
+    # second run: the next 50, none repeated
+    capture_source(
+        {
+            "id": "listing",
+            "kind": "listing_page",
+            "url": "https://example.test/listing",
+        },
+        fake,
+        tmp_path,
+        T2,
+    )
+    day2_files = list((tmp_path / "raw" / "listing" / D2).glob("file*.pdf"))
+    assert len(day2_files) == 50
+    assert {f.name for f in day1_files}.isdisjoint({f.name for f in day2_files})
