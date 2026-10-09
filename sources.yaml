@@ -1,0 +1,125 @@
+- id: cbk_cbr
+  publisher: CBK
+  what: Central Bank Rate (MPC decisions)
+  kind: page_table
+  url: https://www.centralbank.go.ke/rates/central-bank-rate/
+  latest_seen: 2026-08-11      # newest date visible on the page
+  updates: monthly (unverified)
+  robots_ok: yes
+
+
+
+- id: cbk_kesonia
+  publisher: CBK
+  what: Interbank Rate
+  kind: listing_page
+  url: https://www.centralbank.go.ke/kesonia/
+  latest_seen: 2026-10-06     # newest date visible on the page
+  updates: daily (irregular, unverified)
+  robots_ok: yes
+
+
+- id: cbk_tbills
+  publisher: CBK
+  what: Treasury Bills (91, 182, 364 days)
+  kind: page_table
+  url: https://www.centralbank.go.ke/bills-bonds/treasury-bills/
+  latest_seen: 2026-10-06     # newest date visible on the page
+  updates: weekly (unverified)
+  notes: That weighted-average table has a date filter ("From 2026 October To 2026 October"), so the page as loaded only shows the current month.
+  robots_ok: yes
+
+
+- id: cbk_forex_daily
+  publisher: CBK
+  what: Exchange Rates (USD, GBP, EUR, JPY, CNY, ZAR, etc.)
+  kind: page_table
+  url: https://www.centralbank.go.ke/forex/
+  latest_seen: 2026-10-07     # newest date visible on the page
+  updates: daily 
+  robots_ok: yes
+
+
+- id: cbk_forex_monthly
+  publisher: CBK
+  what: Monthly Exchange Rates (USD, GBP, EUR, JPY, CNY, ZAR, etc.)
+  kind: listing_page
+  url: https://www.centralbank.go.ke/statistics/exchange-rates/monthly-exchange-rate-period-average/
+  latest_seen: 2026-10-01     # newest date visib
+  updates: monthly
+  robots_ok: yes 
+
+
+- id: cbk_weekly_bulletin
+  publisher: CBK
+  what: Weekly Bulletin (PDF)
+  kind: listing_page
+  url: https://www.centralbank.go.ke/releases/weekly-bulletin/
+  latest_seen: 2026-09-25    # newest date visible on the page
+  updates: weekly (unverified)
+  robots_ok: yes
+
+
+
+- id: cbk_mei
+  publisher: CBK
+  what: Monthly Economic Indicators (PDF)
+  kind: listing_page
+  url: https://www.centralbank.go.ke/monthly-economic-indicators/
+  latest_seen: 2026-07-01    
+  updates: monthly (unverified)
+  robots_ok: yes
+
+
+- id: cbk_statistical_bulletin
+  publisher: CBK
+  what: Statistical Bulletin (PDF)
+  kind: listing_page
+  url: https://www.centralbank.go.ke/releases/statistical-bulletin/
+  latest_seen: 2025-12-31 
+  updates: Twice a year (unverified)
+  robots_ok: yes
+
+
+
+- id: knbs_cpi
+  publisher: KNBS
+  what: Consumer Price Index (CPI) / Inflation Rate
+  kind: listing_page
+  url: https://www.knbs.or.ke/cpi-and-inflation-rates/
+  latest_seen: 2026-09-30     # newest date visible on the page
+  updates: monthly (unverified)
+  robots_ok: yes
+
+
+
+- id: knbs_gdp_quarterly
+  publisher: KNBS
+  what: Gross Domestic Product (GDP) - Quarterly
+  kind: listing_page
+  url: https://www.knbs.or.ke/quarterly-gdp/
+  latest_seen: 2026-06-30     # newest date visible on the page
+  updates: quarterly (unverified)
+  robots_ok: yes
+  notes: id renamed from knbs_gdp_quartely (typo) on 2026-10-09; older capture.log lines use the old id.
+
+
+- id: knbs_economic_survey
+  publisher: KNBS
+  what: Economic Survey (PDF)
+  kind: listing_page
+  url: https://www.knbs.or.ke/economic-surveys/
+  latest_seen: 2026-06-30     # newest date visible on the page
+  updates: annually (unverified)
+  robots_ok: yes
+
+
+
+- id: knbs_lei
+  publisher: KNBS
+  what: Leading Economic Indicators (PDF)
+  kind: listing_page
+  url: https://www.knbs.or.ke/leading-economic-indicators/
+  latest_seen: 2026-08-30     # newest date visible on the page
+  updates: monthly (unverified)
+  robots_ok: yes
