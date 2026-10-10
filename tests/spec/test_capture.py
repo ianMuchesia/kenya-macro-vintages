@@ -36,6 +36,30 @@ class FakeFetch:
             return result
 
 
+class MemoryStorage:
+    """Pretends to be Azure storage. Keeps files in a dict: key -> bytes. write once,like the real one"""
+
+    def __init__(self):
+        self.blobs: dict[str, bytes] = {}  # key -> bytes
+        self.replaced = []  # keys that were overwritten in order
+
+    def write(self, key: str, data: bytes):
+        if key in self.blobs:
+            raise FileExistsError(f"Blob {key} already exists")
+        self.blobs[key] = data
+
+    def read(self, key: str) -> bytes | None:
+        return self.blobs.get(key)
+
+    def replace(self, key: str, data: bytes):
+
+        self.replaced.append(key)
+        self.blobs[key] = data
+
+    def list(self, prefix: str):
+        return sorted(k for k in self.blobs if k.startswith(prefix))
+
+
 T1 = datetime(2026, 10, 8, 3, 0, 0, tzinfo=UTC)
 T2 = datetime(2026, 10, 8, 3, 5, 0, tzinfo=UTC)
 
@@ -48,29 +72,34 @@ CBR = {"id": "cbk_cbr", "kind": "page_table", "url": "https://example.test/cbr"}
 # ------- 1. Never overwrite existing files -----------------
 
 
-def test_two_captures_of_same_source_never_overwrite(tmp_path):
+def test_two_captures_of_same_source_never_overwrite():
+
+    storage = MemoryStorage()
+
     fetch = FakeFetch(
         {
             CBR["url"]: FakeResponse(200, b"<html>day one</html> "),
         }
     )
 
-    capture_source(CBR, fetch, tmp_path, T1)
+    capture_source(CBR, fetch, storage, T1)
 
     fetch.responses[CBR["url"]] = FakeResponse(200, b"<html>day two</html> ")
 
-    capture_source(CBR, fetch, tmp_path, T2)
+    capture_source(CBR, fetch, storage, T2)
 
-    folders = sorted((tmp_path / "raw" / "cbk_cbr").iterdir())
+    # every saved page of this source, oldest first
+    pages = [key for key in storage.list("raw/cbk_cbr/") if key.endswith("/page.html")]
 
-    assert len(folders) == 2
-    bodies = [(folder / "page.html").read_bytes() for folder in folders]
+    assert len(pages) == 2
+    bodies = [storage.read(key) for key in pages]
 
     assert bodies == [b"<html>day one</html> ", b"<html>day two</html> "]
 
 
 # ----- 2. Meta.json -----
-def test_every_capture_writes_meta_with_url_time_hash_status(tmp_path):
+def test_every_capture_writes_meta_with_url_time_hash_status():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             CBR["url"]: FakeResponse(200, b"<html>day one</html> "),
@@ -78,10 +107,9 @@ def test_every_capture_writes_meta_with_url_time_hash_status(tmp_path):
     )
 
     # open its meta.json file and check it has the right fields
-    capture_source(CBR, fake, tmp_path, T1)
+    capture_source(CBR, fake, storage, T1)
 
-    meta_path = tmp_path / "raw" / "cbk_cbr" / D1 / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(storage.read("raw/cbk_cbr/" + D1 + "/meta.json"))  # type: ignore
 
     assert meta["url"] == CBR["url"]
     assert meta["fetched_at"] == D1
@@ -90,17 +118,17 @@ def test_every_capture_writes_meta_with_url_time_hash_status(tmp_path):
 
     # and that sha256 matches with hash of the saved pages bytes(use hashlib )
 
-    page_path = tmp_path / "raw" / "cbk_cbr" / D1 / "page.html"
-    with open(page_path, "rb") as f:
-        page_data = f.read()
-    assert meta["sha256"] == hashlib.sha256(page_data).hexdigest()
+    page_data = storage.read("raw/cbk_cbr/" + D1 + "/page.html")  # type: ignore
+    assert meta["sha256"] == hashlib.sha256(page_data).hexdigest()  # type: ignore
 
 
 # ------ 3. Listing pages-----------
 
 
-def test_listing_link_already_in_manifest_is_not_downloaded_again(tmp_path):
+def test_listing_link_already_in_manifest_is_not_downloaded_again():
     # a listing page linking to a.pdf and b.pdf
+
+    storage = MemoryStorage()
 
     fake = FakeFetch(
         {
@@ -123,13 +151,13 @@ def test_listing_link_already_in_manifest_is_not_downloaded_again(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
     # first capture both downloaded
-    assert (tmp_path / "raw" / "listing" / D1 / "a.pdf").exists()
-    assert (tmp_path / "raw" / "listing" / D1 / "b.pdf").exists()
+    assert storage.read("raw/listing/" + D1 + "/a.pdf") is not None
+    assert storage.read("raw/listing/" + D1 + "/b.pdf") is not None
 
     # second capture: neither fetched again (check FakeFetch.calls)
     capture_source(
@@ -139,15 +167,17 @@ def test_listing_link_already_in_manifest_is_not_downloaded_again(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
     assert fake.calls.count("https://example.test/a.pdf") == 1
     assert fake.calls.count("https://example.test/b.pdf") == 1
 
 
-def test_new_link_on_listing_page_is_downloaded(tmp_path):
+def test_new_link_on_listing_page_is_downloaded():
     # a listing page linking to a.pdf and b.pdf
+
+    storage = MemoryStorage()
 
     fake = FakeFetch(
         {
@@ -171,13 +201,13 @@ def test_new_link_on_listing_page_is_downloaded(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
     # first capture both downloaded
-    assert (tmp_path / "raw" / "listing" / D1 / "a.pdf").exists()
-    assert (tmp_path / "raw" / "listing" / D1 / "b.pdf").exists()
+    assert storage.read("raw/listing/" + D1 + "/a.pdf") is not None
+    assert storage.read("raw/listing/" + D1 + "/b.pdf") is not None
 
     # second capture: add c.pdf to the listing page
     fake.responses["https://example.test/listing"] = FakeResponse(
@@ -196,18 +226,19 @@ def test_new_link_on_listing_page_is_downloaded(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
 
     # c.pdf should be downloaded now
-    assert (tmp_path / "raw" / "listing" / D2 / "c.pdf").exists()
+    assert storage.read("raw/listing/" + D2 + "/c.pdf") is not None
 
 
 # -------  ----4. Failure Isolation --------------
 
 
-def test_one_failing_source_does_not_stop_others(tmp_path):
+def test_one_failing_source_does_not_stop_others():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/good": FakeResponse(200, b"good"),
@@ -221,27 +252,26 @@ def test_one_failing_source_does_not_stop_others(tmp_path):
             {"id": "bad", "kind": "page_table", "url": "https://example.test/bad"},
         ],
         fetch=fake,
-        out_dir=tmp_path,
+        storage=storage,
         now=T1,
-        log_path=tmp_path / "capture.log",
     )
 
     # good should be captured
-    assert (tmp_path / "raw" / "good" / D1 / "page.html").exists()
 
-    meta_path = tmp_path / "raw" / "good" / D1 / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    assert storage.read("raw/good/" + D1 + "/page.html") is not None
+
+    meta = json.loads(storage.read("raw/good/" + D1 + "/meta.json"))  # type: ignore
     assert meta["status"] == 200
 
-    # bad should not be captured
-    assert not (tmp_path / "raw" / "bad").exists()
+    assert storage.list("raw/bad/") == []
 
 
 # ---------------------5.logging--------------------------
 
 
-def test_every_source_produces_exactly_one_log_line(tmp_path):
+def test_every_source_produces_exactly_one_log_line():
     # run three sources, one of which fails
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/good": FakeResponse(200, b"good"),
@@ -250,7 +280,6 @@ def test_every_source_produces_exactly_one_log_line(tmp_path):
         }
     )
 
-    log_path = tmp_path / "capture.log"
     run(
         [
             {"id": "good", "kind": "page_table", "url": "https://example.test/good"},
@@ -258,13 +287,15 @@ def test_every_source_produces_exactly_one_log_line(tmp_path):
             {"id": "ugly", "kind": "page_table", "url": "https://example.test/ugly"},
         ],
         fetch=fake,
-        out_dir=tmp_path,
+        storage=storage,
         now=T1,
-        log_path=log_path,
     )
 
     # check log file has three lines, one for each source
-    lines = log_path.read_text().strip().splitlines()
+    log_keys = storage.list("logs/")
+    assert len(log_keys) == 1
+    lines = storage.read(log_keys[0]).decode().strip().splitlines()  # type: ignore
+
     assert len(lines) == 3
 
     # each with a source, status, and run_id
@@ -278,7 +309,8 @@ def test_every_source_produces_exactly_one_log_line(tmp_path):
 # ------------5. Website  is down or returns an error-----------
 
 
-def test_source_with_404_or_network_error_is_logged(tmp_path):
+def test_source_with_404_or_network_error_is_logged():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/good": FakeResponse(200, b"good"),
@@ -287,7 +319,6 @@ def test_source_with_404_or_network_error_is_logged(tmp_path):
         }
     )
 
-    log_path = tmp_path / "capture.log"
     run(
         [
             {"id": "good", "kind": "listing_page", "url": "https://example.test/good"},
@@ -295,12 +326,14 @@ def test_source_with_404_or_network_error_is_logged(tmp_path):
             {"id": "ugly", "kind": "listing_page", "url": "https://example.test/ugly"},
         ],
         fetch=fake,
-        out_dir=tmp_path,
+        storage=storage,
         now=T1,
-        log_path=log_path,
     )
 
-    lines = log_path.read_text().strip().splitlines()
+    log_keys = storage.list("logs/")
+    assert len(log_keys) == 1
+    lines = storage.read(log_keys[0]).decode().strip().splitlines()  # type: ignore
+
     log_entries = [json.loads(line) for line in lines]
 
     good_entry = next(entry for entry in log_entries if entry["source"] == "good")
@@ -322,8 +355,9 @@ def test_source_with_404_or_network_error_is_logged(tmp_path):
 # -------------------the internet custs out completely--------------------
 
 
-def test_all_sources_fail_is_logged(tmp_path):
+def test_all_sources_fail_is_logged():
     # the program does not crash and does not leave half-written files, and logs the errors
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/good": Exception("network error"),
@@ -332,7 +366,6 @@ def test_all_sources_fail_is_logged(tmp_path):
         }
     )
 
-    log_path = tmp_path / "capture.log"
     run(
         [
             {"id": "good", "kind": "page_table", "url": "https://example.test/good"},
@@ -340,13 +373,14 @@ def test_all_sources_fail_is_logged(tmp_path):
             {"id": "ugly", "kind": "page_table", "url": "https://example.test/ugly"},
         ],
         fetch=fake,
-        out_dir=tmp_path,
+        storage=storage,
         now=T1,
-        log_path=log_path,
     )
 
     # check log file has three lines, one for each source
-    lines = log_path.read_text().strip().splitlines()
+    log_keys = storage.list("logs/")
+    assert len(log_keys) == 1
+    lines = storage.read(log_keys[0]).decode().strip().splitlines()  # type: ignore
     assert len(lines) == 3
 
     # each with a source, status, and run_id
@@ -360,7 +394,8 @@ def test_all_sources_fail_is_logged(tmp_path):
 # ---- A pdf download fails on day one
 
 
-def test_pdf_download_fails_on_day_one_but_succeeds_on_day_two(tmp_path):
+def test_pdf_download_fails_on_day_one_but_succeeds_on_day_two():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/listing": FakeResponse(
@@ -381,7 +416,7 @@ def test_pdf_download_fails_on_day_one_but_succeeds_on_day_two(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
@@ -395,19 +430,20 @@ def test_pdf_download_fails_on_day_one_but_succeeds_on_day_two(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
 
     # check that a.pdf was downloaded on day two
-    assert (tmp_path / "raw" / "listing" / D2 / "a.pdf").exists()
+    assert storage.read("raw/listing/" + D2 + "/a.pdf") is not None
 
 
 # same file name but different content on day two: should be saved as a new file, not overwrite the old one
 @pytest.mark.xfail(
     reason="v0 known gap: same-URL replacement not detected; manifest skips known URLs"
 )
-def test_same_file_name_different_content_on_day_two(tmp_path):
+def test_same_file_name_different_content_on_day_two():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/listing": FakeResponse(
@@ -428,7 +464,7 @@ def test_same_file_name_different_content_on_day_two(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
@@ -442,25 +478,24 @@ def test_same_file_name_different_content_on_day_two(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
 
     # check that both versions exist
-    assert (tmp_path / "raw" / "listing" / D1 / "a.pdf").exists()
-    assert (tmp_path / "raw" / "listing" / D2 / "a.pdf").exists()
+    assert storage.read("raw/listing/" + D1 + "/a.pdf") is not None
+    assert storage.read("raw/listing/" + D2 + "/a.pdf") is not None
 
     # check that the contents are different
-    with open(tmp_path / "raw" / "listing" / D1 / "a.pdf", "rb") as f:
-        content_v1 = f.read()
-    with open(tmp_path / "raw" / "listing" / D2 / "a.pdf", "rb") as f:
-        content_v2 = f.read()
+    content_v1 = storage.read("raw/listing/" + D1 + "/a.pdf")
+    content_v2 = storage.read("raw/listing/" + D2 + "/a.pdf")
 
     assert content_v1 != content_v2
 
 
 # A link dissapears from the listing page: should not be downloaded again, but old version remains
-def test_link_disappears_from_listing_page(tmp_path):
+def test_link_disappears_from_listing_page():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/listing": FakeResponse(
@@ -481,7 +516,7 @@ def test_link_disappears_from_listing_page(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
@@ -499,19 +534,20 @@ def test_link_disappears_from_listing_page(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
 
     # check that a.pdf from day one still exists
-    assert (tmp_path / "raw" / "listing" / D1 / "a.pdf").exists()
+    assert storage.read("raw/listing/" + D1 + "/a.pdf") is not None
 
     # check that a.pdf was not downloaded again on day two
-    assert not (tmp_path / "raw" / "listing" / D2 / "a.pdf").exists()
+    assert storage.read("raw/listing/" + D2 + "/a.pdf") is None
 
 
 # the page did not change at all: should not be downloaded again, but old version remains
-def test_page_did_not_change(tmp_path):
+def test_page_did_not_change():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/page": FakeResponse(
@@ -524,7 +560,7 @@ def test_page_did_not_change(tmp_path):
     capture_source(
         {"id": "page", "kind": "listing_page", "url": "https://example.test/page"},
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
@@ -532,20 +568,21 @@ def test_page_did_not_change(tmp_path):
     capture_source(
         {"id": "page", "kind": "listing_page", "url": "https://example.test/page"},
         fake,
-        tmp_path,
+        storage,
         T2,
     )
 
     # check that the page from day one still exists
-    assert (tmp_path / "raw" / "page" / D1 / "page.html").exists()
+    assert storage.read("raw/page/" + D1 + "/page.html") is not None
 
     # day two IS saved; meta says nothing changed
-    assert (tmp_path / "raw" / "page" / D2 / "page.html").exists()
-    meta2 = json.loads((tmp_path / "raw" / "page" / D2 / "meta.json").read_text())
+    assert storage.read("raw/page/" + D2 + "/page.html") is not None
+    meta2 = json.loads(storage.read("raw/page/" + D2 + "/meta.json"))  # type: ignore
     assert meta2["changed"] is False
 
 
-def test_files_downloaded_before_a_crash_are_kept_in_manifest(tmp_path):
+def test_files_downloaded_before_a_crash_are_kept_in_manifest():
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/listing": FakeResponse(
@@ -568,22 +605,23 @@ def test_files_downloaded_before_a_crash_are_kept_in_manifest(tmp_path):
                 "url": "https://example.test/listing",
             },
             fake,
-            tmp_path,
+            storage,
             T1,
         )
 
     # a.pdf was finished before the crash: it is in the manifest AND on disk
-    manifest = json.loads((tmp_path / "raw" / "listing" / "manifest.json").read_text())
+    manifest = json.loads(storage.read("raw/listing/manifest.json"))  # type: ignore
     assert "https://example.test/a.pdf" in manifest
     entry = manifest["https://example.test/a.pdf"]
-    assert (tmp_path / "raw" / "listing" / entry["file"]).exists()
+    assert storage.read("raw/listing/" + entry["file"]) is not None
 
     # b.pdf was never finished: it is not in the manifest
     assert "https://example.test/b.pdf" not in manifest
 
 
-def test_at_most_50_new_files_are_downloaded_per_run(tmp_path):
+def test_at_most_50_new_files_are_downloaded_per_run():
     # a listing page with 100 links, but only 50 should be downloaded per run
+    storage = MemoryStorage()
     fake = FakeFetch(
         {
             "https://example.test/listing": FakeResponse(
@@ -610,13 +648,15 @@ def test_at_most_50_new_files_are_downloaded_per_run(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T1,
     )
 
     # check that only 50 files were downloaded
     # first run: only 50 files
-    day1_files = list((tmp_path / "raw" / "listing" / D1).glob("file*.pdf"))
+    day1_files = [
+        key for key in storage.list("raw/listing/" + D1) if key.endswith(".pdf")
+    ]
     assert len(day1_files) == 50
 
     # second run: the next 50, none repeated
@@ -627,9 +667,73 @@ def test_at_most_50_new_files_are_downloaded_per_run(tmp_path):
             "url": "https://example.test/listing",
         },
         fake,
-        tmp_path,
+        storage,
         T2,
     )
-    day2_files = list((tmp_path / "raw" / "listing" / D2).glob("file*.pdf"))
+
+    day2_files = [
+        key for key in storage.list("raw/listing/" + D2) if key.endswith(".pdf")
+    ]
     assert len(day2_files) == 50
-    assert {f.name for f in day1_files}.isdisjoint({f.name for f in day2_files})
+
+    assert {k.split("/")[-1] for k in day1_files}.isdisjoint(
+        {k.split("/")[-1] for k in day2_files}
+    )
+
+
+def test_capturer_never_overwrites_a_raw_object():
+    storage = MemoryStorage()
+
+    storage.blobs[f"raw/cbk_cbr/{D1}/page.html"] = b"original content"
+
+    fake = FakeFetch({CBR["url"]: FakeResponse(200, b"new")})
+
+    record = capture_source(CBR, fake, storage, T1)
+
+    # the original content is still there, not overwritten
+    assert record["status"] == "failed"
+    assert storage.read(f"raw/cbk_cbr/{D1}/page.html") == b"original content"
+
+    record2 = capture_source(CBR, fake, storage, T2)
+
+    assert record2["status"] == "ok"
+    assert storage.read(f"raw/cbk_cbr/{D2}/page.html") == b"new"
+
+
+def test_manifest_is_the_only_thing_replaced():
+    storage = MemoryStorage()
+
+    listing = {
+        "id": "listing",
+        "kind": "listing_page",
+        "url": "https://example.test/listing",
+    }
+
+    fake = FakeFetch(
+        {
+            "https://example.test/listing": FakeResponse(
+                200, b'<a href="a.pdf">A</a><a href="b.pdf">B</a>'
+            ),
+            "https://example.test/a.pdf": FakeResponse(200, b"PDF A"),
+            "https://example.test/b.pdf": FakeResponse(200, b"PDF B"),
+            "https://example.test/c.pdf": FakeResponse(200, b"PDF C"),
+        }
+    )
+
+    capture_source(listing, fake, storage, T1)
+
+    fake.responses["https://example.test/listing"] = FakeResponse(
+        200, b'<a href="a.pdf">A</a><a href="b.pdf">B</a><a href="c.pdf">C</a>'
+    )
+
+    capture_source(listing, fake, storage, T2)
+
+    # postive checks: both runs saved their files
+    assert storage.read(f"raw/listing/{D1}/a.pdf") == b"PDF A"
+    assert storage.read(f"raw/listing/{D1}/b.pdf") == b"PDF B"
+    assert storage.read(f"raw/listing/{D2}/c.pdf") == b"PDF C"
+
+    # manifest is replaced, but no other files are replaced
+    assert storage.replaced
+
+    assert all(key == "raw/listing/manifest.json" for key in storage.replaced)

@@ -1,0 +1,18 @@
+# Only pyproject.toml, uv.lock, capture/, certs/ and sources.yaml are needed in the image.
+# Secrets and captured data must never be sent to the build.
+.env
+.env.*
+data/
+evidence/
+.venv/
+.git/
+.github/
+.devcontainer/
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+tests/
+docs/
+db/
+core/
+scripts/

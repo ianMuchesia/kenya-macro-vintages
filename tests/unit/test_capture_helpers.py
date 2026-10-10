@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta, timezone
 
 from capture.run import capture_source, file_name_for, find_file_links, folder_name
+from capture.storage import LocalStorage
 
 
 class FakeResponse:
@@ -52,18 +53,15 @@ def test_file_name_for_is_safe_and_unique():
 def test_same_timestamp_twice_fails_and_keeps_first_capture(tmp_path):
     source = {"id": "s", "kind": "page_table", "url": "https://example.test/s"}
 
-    first = capture_source(
-        source, lambda url: FakeResponse(200, b"first"), tmp_path, T1
-    )
+    storage = LocalStorage(tmp_path)
+    first = capture_source(source, lambda url: FakeResponse(200, b"first"), storage, T1)
     second = capture_source(
-        source, lambda url: FakeResponse(200, b"second"), tmp_path, T1
+        source, lambda url: FakeResponse(200, b"second"), storage, T1
     )
 
     assert first["status"] == "ok"
     assert second["status"] == "failed"
-    assert (
-        tmp_path / "raw" / "s" / "2026-10-08T03-00-00Z" / "page.html"
-    ).read_bytes() == b"first"
+    assert storage.read("raw/s/2026-10-08T03-00-00Z/page.html") == b"first"
 
 
 def test_unknown_kind_fails_without_fetching(tmp_path):
@@ -71,7 +69,7 @@ def test_unknown_kind_fails_without_fetching(tmp_path):
     record = capture_source(
         {"id": "s", "kind": "typo", "url": "https://example.test/s"},
         lambda url: calls.append(url),
-        tmp_path,
+        LocalStorage(tmp_path),
         T1,
     )
     assert record["status"] == "failed"
@@ -90,7 +88,7 @@ def test_failed_file_is_reported_and_left_out_of_manifest(tmp_path):
     record = capture_source(
         {"id": "s", "kind": "listing_page", "url": "https://example.test/list"},
         responses.__getitem__,
-        tmp_path,
+        LocalStorage(tmp_path),
         T1,
     )
 
@@ -101,20 +99,40 @@ def test_failed_file_is_reported_and_left_out_of_manifest(tmp_path):
     assert list(manifest) == ["https://example.test/a.pdf"]
 
 
-def test_crash_mid_capture_leaves_no_partial_folder(tmp_path):
+def test_crash_before_any_file_keeps_the_page_and_no_manifest(tmp_path):
+    # Storage is write-once with no delete, so the finished page capture stays;
+    # the PDF never finished, so it is neither stored nor in the manifest.
     def fetch(url):
         if url.endswith(".pdf"):
             raise KeyboardInterrupt
         return FakeResponse(200, b'<a href="a.pdf"></a>')
 
+    storage = LocalStorage(tmp_path)
     try:
         capture_source(
             {"id": "s", "kind": "listing_page", "url": "https://example.test/l"},
             fetch,
-            tmp_path,
+            storage,
             T1,
         )
     except KeyboardInterrupt:
         pass
 
-    assert not (tmp_path / "raw" / "s").exists()
+    assert storage.list("raw/s/") == [
+        "raw/s/2026-10-08T03-00-00Z/meta.json",
+        "raw/s/2026-10-08T03-00-00Z/page.html",
+    ]
+
+
+def test_previous_capture_without_meta_is_ignored(tmp_path):
+    # A capture that died between page.html and meta.json must not count as "previous".
+    storage = LocalStorage(tmp_path)
+    storage.write("raw/s/2026-10-07T03-00-00Z/page.html", b"same")
+    record = capture_source(
+        {"id": "s", "kind": "page_table", "url": "https://example.test/s"},
+        lambda url: FakeResponse(200, b"same"),
+        storage,
+        T1,
+    )
+    assert record["status"] == "ok"
+    assert record["changed"] is True
