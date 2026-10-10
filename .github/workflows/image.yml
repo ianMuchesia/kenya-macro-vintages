@@ -1,0 +1,36 @@
+name: Image
+
+# Pushing a tag like v0.1.0 runs the tests, then builds the capturer image and
+# pushes it to ghcr.io/ianmuchesia/kenya-macro-vintages:v0.1.0.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/ianmuchesia/kenya-macro-vintages:${{ github.ref_name }}

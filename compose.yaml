@@ -29,5 +29,14 @@ services:
       postgres:
         condition: service_healthy
 
+  # Local Blob storage emulator, for testing BlobStorage: docker compose --profile lake up -d azurite
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
+    profiles: ["lake"]
+    restart: "no"
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--skipApiVersionCheck"]
+    ports:
+      - "10000:10000"
+
 volumes:
   pgdata:

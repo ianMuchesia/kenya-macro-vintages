@@ -1,19 +1,19 @@
-"""Capture each source into its own timestamped folder under <out_dir>/raw/<id>/.
+"""Capture each source under its own timestamped prefix: raw/<id>/<stamp>/.
 
-The page (page.html + meta.json) is built under a hidden staging name and
-renamed into place only when complete, and an existing capture is never
-overwritten. Linked files are then added to that folder one at a time: each is
-written whole before manifest.json lists it, so if the process dies (Ctrl+C,
-kill, power cut) every file in the manifest is on disk and the rest are
-fetched by the next run.
+Everything goes through a storage object (see capture/storage.py), which is
+write-once: a saved key can never be overwritten. The only key that is ever
+replaced is raw/<id>/manifest.json, the index of files already downloaded.
+
+page.html is saved first and meta.json last, so a capture without meta.json is
+incomplete and is ignored. Linked files are then saved one at a time, each one
+whole before the manifest lists it: if the process dies (Ctrl+C, kill, power
+cut) every file in the manifest is in storage and the rest are fetched by the
+next run.
 """
 
-import contextlib
 import hashlib
 import json
-import os
 import re
-import shutil
 import uuid
 from datetime import UTC
 from html.parser import HTMLParser
@@ -78,38 +78,25 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _write_atomic(path, data):
-    """Write bytes so path is either absent or complete, never half-written."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
+def _json_bytes(data):
+    return json.dumps(data, indent=2, sort_keys=True).encode()
 
 
-def _write_json_atomic(path, data):
-    _write_atomic(path, json.dumps(data, indent=2, sort_keys=True).encode())
+def _read_manifest(storage, key):
+    data = storage.read(key)
+    return json.loads(data) if data is not None else {}
 
 
-def _read_manifest(path):
-    if path.exists():
-        return json.loads(path.read_text())
-    return {}
-
-
-def _previous_sha256(source_dir):
-    """sha256 of the newest earlier capture of this source, or None if there is none."""
-    if not source_dir.exists():
+def _previous_sha256(storage, source_prefix):
+    """sha256 of the newest complete capture of this source, or None if there is none."""
+    metas = [
+        key
+        for key in storage.list(source_prefix)
+        if key.count("/") == source_prefix.count("/") + 1 and key.endswith("/meta.json")
+    ]
+    if not metas:
         return None
-    for folder in sorted(source_dir.iterdir(), reverse=True):
-        meta_path = folder / "meta.json"
-        if folder.is_dir() and not folder.name.startswith(".") and meta_path.exists():
-            return json.loads(meta_path.read_text())["sha256"]
-    return None
-
-
-def _remove_capture(capture_dir, source_dir):
-    shutil.rmtree(capture_dir, ignore_errors=True)
-    with contextlib.suppress(OSError):
-        source_dir.rmdir()  # only succeeds if this left it empty
+    return json.loads(storage.read(metas[-1]))["sha256"]
 
 
 def _fetch_ok(fetch, url):
@@ -119,7 +106,7 @@ def _fetch_ok(fetch, url):
     return response
 
 
-def capture_source(source, fetch, out_dir, now):
+def capture_source(source, fetch, storage, now):
     """Capture one source. Never raises: any failure comes back as a "failed" record."""
     record = {
         "source": None,
@@ -132,14 +119,14 @@ def capture_source(source, fetch, out_dir, now):
     }
     try:
         record["source"] = source["id"]
-        record.update(_capture(source, fetch, Path(out_dir), now, record))
+        record.update(_capture(source, fetch, storage, now, record))
         record["status"] = "ok"
     except Exception as exc:  # noqa: BLE001 - one failing source must never stop the others
         record["error"] = f"{type(exc).__name__}: {exc}"
     return record
 
 
-def _capture(source, fetch, out_dir, now, record):
+def _capture(source, fetch, storage, now, record):
     kind = source["kind"]
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}, expected one of {KINDS}")
@@ -149,68 +136,55 @@ def _capture(source, fetch, out_dir, now, record):
     if response.status != 200:
         raise RuntimeError(f"HTTP {response.status}")
 
-    source_dir = out_dir / "raw" / source["id"]
+    source_prefix = f"raw/{source['id']}/"
     stamp = folder_name(now)
-    final_dir = source_dir / stamp
-    if final_dir.exists():
-        raise FileExistsError(f"capture {final_dir} already exists")
+    capture_prefix = f"{source_prefix}{stamp}/"
+    if storage.list(capture_prefix):
+        raise FileExistsError(f"capture {capture_prefix} already exists")
 
     sha256 = _sha256(response.body)
-    changed = sha256 != _previous_sha256(source_dir)
+    changed = sha256 != _previous_sha256(storage, source_prefix)
 
-    staging_dir = source_dir / f".partial-{stamp}"
-    shutil.rmtree(staging_dir, ignore_errors=True)  # leftover from a crashed run
-    staging_dir.mkdir(parents=True)
-    try:
-        (staging_dir / "page.html").write_bytes(response.body)
-        meta = {
-            "url": source["url"],
-            "fetched_at": stamp,
-            "sha256": sha256,
-            "status": response.status,
-            "changed": changed,
-        }
-        _write_json_atomic(staging_dir / "meta.json", meta)
-        staging_dir.rename(final_dir)
-    except BaseException:
-        _remove_capture(staging_dir, source_dir)
-        raise
+    storage.write(capture_prefix + "page.html", response.body)
+    meta = {
+        "url": source["url"],
+        "fetched_at": stamp,
+        "sha256": sha256,
+        "status": response.status,
+        "changed": changed,
+    }
+    storage.write(
+        capture_prefix + "meta.json", _json_bytes(meta)
+    )  # last: marks it complete
 
     downloaded = []
     file_errors = []
     if kind == "listing_page":
-        manifest_path = source_dir / "manifest.json"
-        manifest = _read_manifest(manifest_path)
+        manifest_key = source_prefix + "manifest.json"
+        manifest = _read_manifest(storage, manifest_key)
         new_links = [
             url
             for url in find_file_links(response.body, source["url"])
             if url not in manifest
         ]
         taken = {"page.html", "meta.json"}
-        try:
-            for url in new_links[:MAX_NEW_FILES_PER_RUN]:
-                try:
-                    file_response = _fetch_ok(fetch, url)
-                except Exception as exc:  # noqa: BLE001 - one failing file must not lose the others
-                    file_errors.append(f"{url}: {type(exc).__name__}: {exc}")
-                    continue
-                name = file_name_for(url, taken)
-                taken.add(name)
-                _write_atomic(final_dir / name, file_response.body)
-                # The file is safely on disk, so only now does it join the manifest.
-                manifest[url] = {
-                    "file": f"{stamp}/{name}",
-                    "fetched_at": stamp,
-                    "sha256": _sha256(file_response.body),
-                }
-                _write_json_atomic(manifest_path, manifest)
-                downloaded.append(url)
-        except BaseException:
-            if (
-                not downloaded
-            ):  # interrupted before any file was kept: leave nothing behind
-                _remove_capture(final_dir, source_dir)
-            raise
+        for url in new_links[:MAX_NEW_FILES_PER_RUN]:
+            try:
+                file_response = _fetch_ok(fetch, url)
+            except Exception as exc:  # noqa: BLE001 - one failing file must not lose the others
+                file_errors.append(f"{url}: {type(exc).__name__}: {exc}")
+                continue
+            name = file_name_for(url, taken)
+            taken.add(name)
+            storage.write(capture_prefix + name, file_response.body)
+            # The file is safely stored, so only now does it join the manifest.
+            manifest[url] = {
+                "file": f"{stamp}/{name}",
+                "fetched_at": stamp,
+                "sha256": _sha256(file_response.body),
+            }
+            storage.replace(manifest_key, _json_bytes(manifest))
+            downloaded.append(url)
 
     return {
         "sha256": sha256,
@@ -220,17 +194,20 @@ def _capture(source, fetch, out_dir, now, record):
     }
 
 
-def run(sources, fetch, out_dir, now, log_path):
-    """Capture every source, writing one JSON log line per source as it finishes."""
-    run_id = f"{folder_name(now)}-{uuid.uuid4().hex[:6]}"
-    log_path = Path(log_path)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+def run(sources, fetch, storage, now):
+    """Capture every source, then save one log object per run: logs/<run_id>.jsonl.
 
+    Each log line is also printed as it happens, so a run that dies part-way
+    still shows its progress in the job's console logs.
+    """
+    run_id = f"{folder_name(now)}-{uuid.uuid4().hex[:6]}"
     records = []
-    with log_path.open("a") as log:
+    try:
         for source in sources:
-            record = {"run_id": run_id, **capture_source(source, fetch, out_dir, now)}
-            log.write(json.dumps(record) + "\n")
-            log.flush()
+            record = {"run_id": run_id, **capture_source(source, fetch, storage, now)}
+            print(json.dumps(record), flush=True)
             records.append(record)
+    finally:
+        lines = "".join(json.dumps(record) + "\n" for record in records)
+        storage.write(f"logs/{run_id}.jsonl", lines.encode())
     return records
