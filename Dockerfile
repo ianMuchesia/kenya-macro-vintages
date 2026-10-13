@@ -15,7 +15,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY capture/ capture/
 COPY certs/ certs/
-COPY sources.yaml ./
+COPY sources*.yaml ./
 
 RUN useradd --create-home --uid 10001 capture
 USER capture
