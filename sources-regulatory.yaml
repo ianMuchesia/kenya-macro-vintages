@@ -1,0 +1,68 @@
+- id: cbk_legislation_guidelines
+  publisher: CBK
+  what: Legislation and guidelines hub (Acts, regulations, guidelines)
+  kind: listing_page
+  url: https://www.centralbank.go.ke/policy-procedures/legislation-and-guidelines/
+  latest_seen: 2026-09-10     # Sept 2026 drafts post; newest uploads are 2026/06 (RIAs) and 2026/03 (Acts)
+  updates: irregular (unverified)
+  robots_ok: yes
+
+- id: cbk_prudential_guidelines
+  publisher: CBK
+  what: Prudential guidelines
+  kind: listing_page
+  url: https://www.centralbank.go.ke/policy-procedures/legislation-and-guidelines/prudential-guidelines/
+  latest_seen: 2016-08        # one PDF (PRUDENTIAL-GUIDELINES.pdf, uploaded 2016/08)
+  updates: irregular (unverified)
+  notes: Its only PDF is also linked from the hub page above, so this source mostly duplicates it. Kept so a new prudential guideline posted only here is still caught.
+  robots_ok: yes
+
+- id: cbk_drafts_sept_2026
+  publisher: CBK
+  what: Sept 2026 draft prudential + risk management guidelines, guidance notes, D-SIB framework
+  kind: listing_page
+  url: https://www.centralbank.go.ke/2026/09/10/draft-cbk-prudential-guidelines-risk-management-guidelines-guidance-notes-and-framework-for-domestic-systemically-important-banks/
+  latest_seen: 2026-09-10
+  updates: one-off (watch for the final versions)
+  robots_ok: yes
+
+- id: cbk_banking_circulars
+  publisher: CBK
+  what: Banking circulars
+  kind: listing_page
+  url: https://www.centralbank.go.ke/policy-procedures/legislation-and-guidelines/circulars/
+  latest_seen: 2023           # newest is Circular No. 11 of 2023; 53 circulars, 2020-2023
+  updates: irregular (unverified)
+  notes: The page shows nothing after 2023. Either CBK stopped posting circulars here or newer ones live elsewhere; check before trusting this source to catch new circulars.
+  robots_ok: yes
+
+- id: kenyalaw_dcp_regulations
+  publisher: Kenya Law
+  what: Central Bank of Kenya (Digital Credit Providers) Regulations, 2022 (LN 46 of 2022)
+  kind: page_table
+  url: https://new.kenyalaw.org/akn/ke/act/ln/2022/46
+  latest_seen: 2022-04-22     # version date; the URL redirects to the newest version (eng@<date>)
+  updates: on amendment
+  notes: The URL has no version date on purpose, so an amendment shows up as a changed page.
+  crawl_delay: 5              # robots.txt Crawl-delay
+  robots_ok: yes (Crawl-delay 5)  # checked 2026-10-13: Allow / except /search/ and /api/
+
+- id: kenyalaw_banking_act
+  publisher: Kenya Law
+  what: Banking Act (Cap. 488)
+  kind: page_table
+  url: https://new.kenyalaw.org/akn/ke/act/1989/9
+  latest_seen: 2024-12-27     # version date; the URL redirects to the newest version (eng@<date>)
+  updates: on amendment
+  crawl_delay: 5              # robots.txt Crawl-delay
+  robots_ok: yes (Crawl-delay 5)
+
+- id: kenyalaw_data_protection_act
+  publisher: Kenya Law
+  what: Data Protection Act, 2019
+  kind: page_table
+  url: https://new.kenyalaw.org/akn/ke/act/2019/24
+  latest_seen: 2022-12-31     # version date; the URL redirects to the newest version (eng@<date>)
+  updates: on amendment
+  crawl_delay: 5              # robots.txt Crawl-delay
+  robots_ok: yes (Crawl-delay 5)

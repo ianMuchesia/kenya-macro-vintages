@@ -99,6 +99,16 @@ def _previous_sha256(storage, source_prefix):
     return json.loads(storage.read(metas[-1]))["sha256"]
 
 
+def _fetch_for(source, fetch):
+    """fetch for this source, honouring its optional crawl_delay (seconds)."""
+    delay = source.get("crawl_delay")
+    if delay is None:
+        return fetch
+    if isinstance(delay, bool) or not isinstance(delay, int | float) or delay < 0:
+        raise ValueError(f"crawl_delay must be a number of seconds, not {delay!r}")
+    return lambda url: fetch(url, min_pause=delay)
+
+
 def _fetch_ok(fetch, url):
     response = fetch(url)
     if response.status != 200:
@@ -131,6 +141,7 @@ def _capture(source, fetch, storage, now, record):
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}, expected one of {KINDS}")
 
+    fetch = _fetch_for(source, fetch)
     response = fetch(source["url"])
     record["http"] = response.status
     if response.status != 200:
@@ -148,6 +159,8 @@ def _capture(source, fetch, storage, now, record):
     storage.write(capture_prefix + "page.html", response.body)
     meta = {
         "url": source["url"],
+        # fakes in tests may not report redirects; then nothing was redirected
+        "final_url": getattr(response, "final_url", None) or source["url"],
         "fetched_at": stamp,
         "sha256": sha256,
         "status": response.status,

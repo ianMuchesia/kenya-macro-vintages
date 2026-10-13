@@ -31,6 +31,7 @@ def build_ssl_context():
 class Response:
     status: int
     body: bytes
+    final_url: str | None = None  # where redirects ended up
 
 
 class Fetcher:
@@ -43,11 +44,10 @@ class Fetcher:
         )
         self.last_request_at = None
 
-    def _get(self, url):
+    def _get(self, url, min_pause):
         if self.last_request_at is not None:
-            wait = PAUSE_BETWEEN_REQUESTS_SECONDS - (
-                time.monotonic() - self.last_request_at
-            )
+            pause = max(min_pause, PAUSE_BETWEEN_REQUESTS_SECONDS)
+            wait = pause - (time.monotonic() - self.last_request_at)
             if wait > 0:
                 time.sleep(wait)
         try:
@@ -55,17 +55,23 @@ class Fetcher:
         finally:
             self.last_request_at = time.monotonic()
 
-    def __call__(self, url):
-        """Retry network errors and 429/5xx; any other status is returned as-is."""
+    def __call__(self, url, min_pause=0):
+        """Retry network errors and 429/5xx; any other status is returned as-is.
+
+        min_pause raises the gap before each request (e.g. a site's robots.txt
+        Crawl-delay); it never goes below PAUSE_BETWEEN_REQUESTS_SECONDS.
+        """
         for wait in (*RETRY_WAITS_SECONDS, None):
             try:
-                response = self._get(url)
+                response = self._get(url, min_pause)
             except httpx.TransportError:
                 if wait is None:
                     raise
             else:
                 if response.status_code not in RETRY_STATUSES or wait is None:
-                    return Response(response.status_code, response.content)
+                    return Response(
+                        response.status_code, response.content, str(response.url)
+                    )
             time.sleep(wait)
 
 

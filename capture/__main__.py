@@ -1,6 +1,7 @@
 """Capture every source in sources.yaml once: uv run python -m capture [--only ID]
 
 Environment:
+    SOURCES_FILE               sources list to capture (default sources.yaml)
     STORAGE                    "local" (default, ./data) or "blob"
     AZURE_STORAGE_ACCOUNT_URL  blob only, e.g. https://<account>.blob.core.windows.net
     AZURE_STORAGE_CONTAINER    blob only
@@ -20,6 +21,10 @@ from capture.http import fetch
 from capture.notify import ping_heartbeat, send_telegram
 from capture.run import run
 from capture.storage import BlobStorage, LocalStorage
+
+
+def load_sources(env):
+    return yaml.safe_load(Path(env.get("SOURCES_FILE", "sources.yaml")).read_text())
 
 
 def make_storage(env, parser):
@@ -46,11 +51,11 @@ def main():
     args = parser.parse_args()
 
     storage = make_storage(os.environ, parser)
-    sources = yaml.safe_load(Path("sources.yaml").read_text())
+    sources = load_sources(os.environ)
     if args.only is not None:
         sources = [source for source in sources if source["id"] == args.only]
         if not sources:
-            parser.error(f"no source with id {args.only!r} in sources.yaml")
+            parser.error(f"no source with id {args.only!r} in the sources file")
     records = run(
         sources,
         fetch=fetch,

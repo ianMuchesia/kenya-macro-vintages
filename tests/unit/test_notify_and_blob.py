@@ -4,7 +4,7 @@ import httpx
 import pytest
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 
-from capture.__main__ import make_storage
+from capture.__main__ import load_sources, make_storage
 from capture.notify import ping_heartbeat, send_telegram
 from capture.storage import BlobStorage, LocalStorage
 
@@ -104,3 +104,16 @@ def test_make_storage_defaults_to_local_and_checks_blob_settings():
         make_storage({"STORAGE": "blob"}, parser)
     with pytest.raises(SystemExit):
         make_storage({"STORAGE": "s3"}, parser)
+
+
+def test_sources_file_comes_from_env_and_defaults_to_sources_yaml(tmp_path):
+    other = tmp_path / "clock2.yaml"
+    other.write_text(
+        "- id: cbk_circulars\n  kind: listing_page\n  url: https://x.test\n"
+    )
+    assert [s["id"] for s in load_sources({"SOURCES_FILE": str(other)})] == [
+        "cbk_circulars"
+    ]
+
+    default_ids = [s["id"] for s in load_sources({})]  # repo's sources.yaml
+    assert "knbs_cpi" in default_ids
